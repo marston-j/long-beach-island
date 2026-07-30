@@ -231,6 +231,27 @@ you asked for. A cache cut exactly to the bbox leaves a blank band on screen.
 The download area is therefore first grown to a 2:1 on-screen aspect ratio
 (accounting for latitude), then padded by `--tile-margin`.
 
+## Deployment
+
+The live site is published from the `gh-pages` branch:
+
+- **[marston-j.github.io/long-beach-island](https://marston-j.github.io/long-beach-island/)** — island detail map
+- **[/region.html](https://marston-j.github.io/long-beach-island/region.html)** — Barnegat Bay to the Pine Barrens
+
+`deploy.sh` builds both pages with their tile caches and publishes them:
+
+```bash
+./deploy.sh            # rebuild from cache and deploy
+./deploy.sh --fetch    # refetch all layer data first (slow)
+```
+
+Source stays on `main`; the rendered site is an orphan `gh-pages` branch holding
+`index.html`, `region.html`, `tiles/` and `lib/` at its root. The script builds
+that branch with `commit-tree` against a temporary index, so your working tree
+is never checked out or stashed. Because the tile cache ships with the site,
+visitors get chart and overlay tiles from GitHub rather than re-hitting NOAA,
+NJDEP, FEMA and USFWS on every page view.
+
 ## Two-Page Deployment
 
 `--page-link` adds a cross-link in the sidebar header, which is how the

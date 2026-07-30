@@ -91,6 +91,28 @@ NJDEP_CAFRA = f"{NJDEP}/Land_CAFRA_coast/MapServer"
 # NJ Pinelands Commission
 PINELANDS = "https://services1.arcgis.com/nCm6SZaiGMuGX35l/arcgis/rest/services"
 
+# NJDEP Landscape Project v3.4 — species-based habitat, ranked 1-5. This is New
+# Jersey's operative mapping of significant habitat, and the spatial stand-in
+# for the USFWS report "Significant Habitats and Habitat Complexes of the New
+# York Bight Watershed" (1997), which was published as narrative and figures
+# with no accompanying GIS dataset.
+NJ_LANDSCAPE = "https://services1.arcgis.com/QWdNfRs7lkPq4g4Q/arcgis/rest/services"
+LANDSCAPE_HABITAT = [
+    ("Marine", f"{NJ_LANDSCAPE}/Landscape_Project_Species_Based_Habitat_Marine/FeatureServer/24"),
+    ("Atlantic Coastal", f"{NJ_LANDSCAPE}/Atlantic_Coastal_Habitat_Landscape_v3_4/FeatureServer/26"),
+    ("Pinelands", f"{NJ_LANDSCAPE}/Landscape_Project_Species_Based_Habitat_Pinelands/FeatureServer/22"),
+    ("Delaware Bay", f"{NJ_LANDSCAPE}/Landscape_Project_Species_Based_Habitat_Delaware_Bay/FeatureServer/25"),
+]
+LANDSCAPE_STREAM = f"{NJ_LANDSCAPE}/Stream_Habitat_Landscape_v3_4/FeatureServer/20"
+LANDSCAPE_VERNAL = f"{NJ_LANDSCAPE}/Landscape_Project_Vernal_Pools/FeatureServer/30"
+LANDSCAPE_VERNAL_HAB = f"{NJ_LANDSCAPE}/Landscape_Project_Vernal_Pools/FeatureServer/13"
+
+# Designated critical habitat under the ESA
+FWS_CRITICAL_HABITAT = ("https://services.arcgis.com/cJ9YHowT8TU7DUyn/arcgis/"
+                        "rest/services/Critical_Habitat/FeatureServer/1")
+NMFS_CRITICAL_HABITAT = ("https://maps.fisheries.noaa.gov/server/rest/services/"
+                         "All_NMFS_Critical_Habitat/MapServer/2")
+
 # USGS Protected Areas Database of the United States (PAD-US 4.1)
 PADUS_MANAGER = (
     "https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/"
@@ -161,6 +183,7 @@ LAYER_GROUPS = [
     ("historic", "Historic"),
     ("protected", "Protected Lands"),
     ("pinelands", "Pine Barrens"),
+    ("habitat", "Significant Habitat"),
     ("marine", "Marine & Estuarine"),
     ("wetlands", "Wetlands & Water"),
     ("wildlife", "Wildlife"),
@@ -247,6 +270,16 @@ LAYER_DEFS = {
     "chanj": {"group": "pinelands", "label": "CHANJ Habitat Cores",
               "color": "#4E8C3C", "on": False, "kind": "raster"},
 
+    # ── Significant Habitat ──
+    "sig_habitat": {"group": "habitat", "label": "Significant Habitat",
+                    "color": "#7D3C98", "on": True},
+    "vernal_pools": {"group": "habitat", "label": "Vernal Pools & Habitat",
+                     "color": "#2980B9", "on": False},
+    "stream_habitat": {"group": "habitat", "label": "Stream Habitat",
+                       "color": "#1ABC9C", "on": False},
+    "critical_habitat": {"group": "habitat", "label": "ESA Critical Habitat",
+                         "color": "#CB4335", "on": True},
+
     # ── Marine & Estuarine ──
     "mpa": {"group": "marine", "label": "Marine Protected Areas",
             "color": "#00688B", "on": True},
@@ -291,6 +324,40 @@ LAYER_DEFS = {
     "bathymetry": {"group": "charts", "label": "Bathymetry (NCEI)",
                    "color": "#1A5276", "on": False, "kind": "raster"},
 }
+
+
+# Stacking order, low to high. Large regional polygons sit at the bottom so the
+# small specific features drawn inside them stay clickable; lines sit above all
+# areas, and point markers above everything.
+STACK_ORDER = [
+    # broad regional extents
+    "pnr", "pinelands_mgmt", "focal_areas", "mpa", "nerrs",
+    # public land ownership
+    "federal_lands", "refuges_fws", "fws_wilderness", "forests", "refuges",
+    "state_parks", "state_lands",
+    # habitat and water
+    "shellfish", "wetlands_osm", "sig_habitat", "critical_habitat",
+    "natural_areas", "nhp_sites",
+    # small, specific areas
+    "nj_historic_dist", "beaches_private", "beaches_public", "reefs",
+    "mini_golf", "amusements", "smoke", "wildfires",
+    # lines
+    "stream_habitat",
+    "hist_shoreline", "old_rail", "orig_highways", "kings_roads",
+    "nj_trails", "park_trails", "bike", "hiking",
+    # points
+    "heritage", "nj_historic", "boat_access", "public_access",
+    "vernal_pools", "tide_stations", "lighthouses", "hotspots", "ebird_obs",
+    "ice_cream",
+]
+
+
+def stack_order() -> list:
+    """STACK_ORDER, with any layer it forgets appended so nothing is dropped."""
+    known = set(STACK_ORDER)
+    missing = [k for k in LAYER_DEFS
+               if k not in known and LAYER_DEFS[k].get("kind") != "raster"]
+    return [k for k in STACK_ORDER if k in LAYER_DEFS] + missing
 
 
 def vector_keys() -> list:
@@ -1444,6 +1511,125 @@ def fetch_pinelands_mgmt(bbox, cache):
 
 
 # ══════════════════════════════════════════════════════════════════
+#  SIGNIFICANT HABITAT
+# ══════════════════════════════════════════════════════════════════
+
+# Landscape Project rank, from the NJDEP methodology. Rank is assigned by the
+# highest-status species documented using the patch.
+LANDSCAPE_RANK = {
+    5: "Rank 5 — habitat for a federally listed species",
+    4: "Rank 4 — habitat for a State endangered species",
+    3: "Rank 3 — habitat for a State threatened species",
+    2: "Rank 2 — habitat for a species of special concern",
+    1: "Rank 1 — species occurrence area",
+}
+
+LANDSCAPE_FIELDS = {
+    "LNDR": "rank", "LABEL20": "landCover", "TYPE20": "coverType",
+    "REGION": "region", "ACRES": "acres", "RIPARIAN": "riparian",
+    "FOR_CORE": "forestCore", "VERSION": "version",
+}
+
+
+HABITAT_MIN_RANK = 4   # overridable with --habitat-rank
+
+
+def fetch_sig_habitat(bbox, cache, *, min_rank: int | None = None):
+    """Significant habitat from the NJDEP Landscape Project v3.4.
+
+    The full dataset is enormous — 152k polygons for the Pinelands region alone
+    across a regional bbox — so it is filtered to the ranks that carry
+    regulatory weight (4: State endangered, 5: federally listed) and capped.
+    On the island preset the result is complete; on the full regional preset it
+    is truncated, and the build log says so.
+    """
+    if min_rank is None:
+        min_rank = HABITAT_MIN_RANK
+    features = []
+    for region, url in LANDSCAPE_HABITAT:
+        gj = _arcgis_geojson(
+            url, bbox, cache,
+            f"landscape_{region.lower().replace(' ', '_')}_r{min_rank}",
+            where=f"LNDR >= {min_rank}", keep=LANDSCAPE_FIELDS,
+            max_features=12000, tol=SIMPLIFY_DEG_COARSE,
+        )
+        for f in gj.get("features", []):
+            f["properties"].setdefault("region", region)
+            features.append(f)
+    return fc(features)
+
+
+def fetch_stream_habitat(bbox, cache):
+    """Stream reaches documented as habitat for listed species."""
+    return _arcgis_geojson(
+        LANDSCAPE_STREAM, bbox, cache, "landscape_stream",
+        keep={"LNDR": "rank", "GNIS_NAME": "name", "REGION": "region",
+              "VERSION": "version"},
+        max_features=6000, tol=SIMPLIFY_DEG_FINE,
+    )
+
+
+VERNAL_STATUS = {
+    "C": "Confirmed vernal pool",
+    "P": "Potential vernal pool",
+    "D": "Documented, not field verified",
+}
+
+
+def fetch_vernal_pools(bbox, cache):
+    """Vernal pools and their surrounding vernal habitat — a defining feature of
+    Pine Barrens amphibian breeding."""
+    pools = _arcgis_geojson(
+        LANDSCAPE_VERNAL, bbox, cache, "landscape_vernal_pools",
+        keep={"VP_ID": "code", "VP_STATUS": "status", "REGION": "region",
+              "VERSION": "version"},
+        max_features=8000, tol=0,
+    )
+    for f in pools.get("features", []):
+        f["properties"]["_kind"] = "pool"
+
+    habitat = _arcgis_geojson(
+        LANDSCAPE_VERNAL_HAB, bbox, cache, "landscape_vernal_habitat",
+        keep={"VPH_ID": "code", "LNDR": "rank", "REGION": "region",
+              "ACRES": "acres"},
+        max_features=4000, tol=SIMPLIFY_DEG,
+    )
+    for f in habitat.get("features", []):
+        f["properties"]["_kind"] = "habitat"
+
+    return fc(pools.get("features", []) + habitat.get("features", []))
+
+
+def fetch_critical_habitat(bbox, cache):
+    """Designated critical habitat under the Endangered Species Act — USFWS
+    polygons plus the NMFS lines that carry Atlantic sturgeon (New York Bight
+    distinct population segment) river habitat."""
+    fws = _arcgis_geojson(
+        FWS_CRITICAL_HABITAT, bbox, cache, "fws_critical_habitat",
+        keep={"comname": "name", "sciname": "sciName", "status": "status",
+              "listing_status": "listing", "unitname": "unit",
+              "COMNAME": "name", "SCINAME": "sciName", "STATUS": "status",
+              "UNIT": "unit", "LISTING_STATUS": "listing"},
+        max_features=500, tol=SIMPLIFY_DEG_COARSE,
+    )
+    for f in fws.get("features", []):
+        f["properties"]["_source"] = "fws"
+
+    nmfs = _arcgis_geojson(
+        NMFS_CRITICAL_HABITAT, bbox, cache, "nmfs_critical_habitat",
+        keep={"COMNAME": "name", "SCIENAME": "sciName", "LISTENTITY": "entity",
+              "LISTSTATUS": "status", "CHSTATUS": "chStatus", "UNIT": "unit",
+              "HABTYPE": "habitatType", "EFFECTDATE": "effective",
+              "INPORTURL": "url"},
+        max_features=500, tol=SIMPLIFY_DEG_FINE,
+    )
+    for f in nmfs.get("features", []):
+        f["properties"]["_source"] = "nmfs"
+
+    return fc(fws.get("features", []) + nmfs.get("features", []))
+
+
+# ══════════════════════════════════════════════════════════════════
 #  MARINE & ESTUARINE
 # ══════════════════════════════════════════════════════════════════
 
@@ -2381,6 +2567,12 @@ body{margin:0;font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Sego
 .layer-group > summary::before{content:'\\25B8';font-size:9px;color:#aaa;transition:transform .15s}
 .layer-group[open] > summary::before{transform:rotate(90deg)}
 .layer-group > summary:hover{background:#faf9f6}
+.group-count{color:#b0aaa0;font-size:10px;font-variant-numeric:tabular-nums}
+.group-acts{display:flex;gap:3px;margin-left:auto}
+.group-acts button{font:inherit;font-size:9px;font-weight:600;letter-spacing:.04em;
+  padding:1px 5px;cursor:pointer;background:#fff;border:1px solid #dcd7ce;
+  border-radius:3px;color:#777;line-height:1.5}
+.group-acts button:hover{background:var(--accent);border-color:var(--accent);color:#fff}
 .map-layer-toggle{display:flex;align-items:center;gap:8px;padding:5px 16px 5px 26px;
   font-size:12px;cursor:pointer;user-select:none}
 .map-layer-toggle:hover{background:rgba(0,0,0,.04)}
@@ -2407,6 +2599,12 @@ body{margin:0;font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Sego
 .chip.no{background:#f7e6e4;color:#9b3227}
 .chip.warn{background:#fdf1dc;color:#8a5a10}
 .popup-links{margin-top:6px;font-size:11px;display:flex;gap:10px;flex-wrap:wrap}
+.multi-head{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8a8a8a;
+  padding-bottom:5px;border-bottom:1px solid #e8e4dc;margin-bottom:6px}
+.multi-item{padding:7px 0;border-bottom:1px solid #f0ece4}
+.multi-item:last-child{border-bottom:none;padding-bottom:0}
+.multi-layer{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#a89f92;
+  display:block;margin-bottom:2px}
 .leaflet-control-layers-toggle{background-image:none!important;background-size:0!important;
   display:flex!important;align-items:center!important;justify-content:center!important;
   width:36px!important;height:36px!important;padding:0!important;margin:0!important}
@@ -2478,7 +2676,8 @@ LEAFLET_CDN = (
 
 MAP_JS_TEMPLATE = r"""
 var _map=null,_mapLayers={},_rasterDefs=__RASTER_DEFS__,_colors=__COLORS__;
-var _tileCache=__TILE_CACHE__,_tileRoot=__TILE_ROOT__;
+var _tileCache=__TILE_CACHE__,_tileRoot=__TILE_ROOT__,_zorder=__ZORDER__;
+var _layerLabels=__LABELS__;
 
 /* Tiles pre-downloaded by --cache-tiles live at tiles/<key>/<z>/<x>/<y>.png.
    Inside the cached zoom range the page never touches the network; outside it
@@ -2542,6 +2741,14 @@ var NoaaChart=L.TileLayer.extend({
 
 function initMap(){
   if(_map){_map.invalidateSize();return;}
+  /* Canvas rendering, with every vector layer sharing ONE canvas.
+     Leaflet creates a separate canvas per pane, and the highest-z canvas
+     swallows clicks even where it has drawn nothing — which is what made
+     polygons in the lower panes unselectable. A single pane means a single
+     canvas, so Leaflet hit-tests all vector layers together and the topmost
+     shape under the cursor wins. SVG would also fix the hit-testing, but not
+     at nine thousand habitat polygons. Draw order (and therefore both paint
+     order and click priority) is set by _restack(). */
   _map=L.map('leaflet-map',{zoomControl:true,preferCanvas:true})
         .setView([__CENTER_LAT__,__CENTER_LNG__],__ZOOM__);
 
@@ -2596,20 +2803,21 @@ function initMap(){
   if(tog){tog.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 22 8.5 12 15 2 8.5"/><polyline points="2 12 12 18.5 22 12"/><polyline points="2 15.5 12 22 22 15.5"/></svg>';}
   L.control.scale({imperial:true,metric:true}).addTo(_map);
 
-  /* ── Panes: rasters under areas under lines under markers ── */
+  /* ── Panes ──
+     One pane for all canvas-drawn vector layers so they share a renderer.
+     Leaflet's own markerPane (zIndex 600) still carries the divIcon markers,
+     which keeps the labelled pins above everything. */
   _map.createPane('tileOverlays').style.zIndex=250;
-  _map.createPane('areas').style.zIndex=350;
-  _map.createPane('lines').style.zIndex=400;
-  _map.createPane('markers').style.zIndex=450;
+  _map.createPane('vectors').style.zIndex=400;
 
   /* ── Style + popup helpers ── */
   function ps(c,d,fill){return function(){return{color:c,weight:2,opacity:.85,
-    fillColor:c,fillOpacity:(fill===undefined?.15:fill),dashArray:d||'',pane:'areas'};};}
+    fillColor:c,fillOpacity:(fill===undefined?.15:fill),dashArray:d||'',pane:'vectors'};};}
   function ls(c,w,d){return function(){return{color:c,weight:w||3,opacity:.9,
-    dashArray:d||'',fill:false,pane:'lines',lineCap:'round'};};}
+    dashArray:d||'',fill:false,pane:'vectors',lineCap:'round'};};}
   function cm(c,r,ring){return function(f,ll){return L.circleMarker(ll,{radius:r||5,
-    fillColor:c,color:ring||'#333',weight:1,fillOpacity:.85,pane:'markers'});};}
-  function glyph(c,svg,size){return function(f,ll){return L.marker(ll,{pane:'markers',
+    fillColor:c,color:ring||'#333',weight:1,fillOpacity:.85,pane:'vectors'});};}
+  function glyph(c,svg,size){return function(f,ll){return L.marker(ll,{pane:'vectors',
     icon:L.divIcon({className:'',iconSize:[size||22,size||22],iconAnchor:[(size||22)/2,(size||22)/2],
       html:'<svg width="'+(size||22)+'" height="'+(size||22)+'" viewBox="0 0 24 24">'+
         '<circle cx="12" cy="12" r="11" fill="'+c+'" stroke="#fff" stroke-width="1.6"/>'+svg+'</svg>'})});};}
@@ -2687,7 +2895,7 @@ function initMap(){
 
   /* ═══ Island & Shore ═══ */
   function beachStyle(c){return function(){return{color:c,weight:3,opacity:.85,
-    fillColor:c,fillOpacity:.22,pane:'areas'};};}
+    fillColor:c,fillOpacity:.22,pane:'vectors'};};}
   function beachPopup(f,layer){
     var p=f.properties,a=p.access;
     var s=kicker('Beach')+'<b>'+esc(p.name||'Beach')+'</b>';
@@ -2734,7 +2942,7 @@ function initMap(){
     onEachFeature:popupOn(accessPopup)},16);
 
   _mapLayers.lighthouses=gj('lighthouses',{
-    pointToLayer:function(f,ll){return L.marker(ll,{pane:'markers',
+    pointToLayer:function(f,ll){return L.marker(ll,{pane:'vectors',
       icon:L.divIcon({className:'',iconSize:[20,22],iconAnchor:[10,20],
         html:'<svg width="20" height="22" viewBox="0 0 20 22">'+
           '<polygon points="10,1 13.5,8 10,6 6.5,8" fill="'+_colors.lighthouses+'"/>'+
@@ -2868,15 +3076,15 @@ function initMap(){
       if(p._source==='nrhp'){
         return L.circleMarker(ll,{radius:p.nhl?8:5,
           fillColor:p.nhl?'#FFD700':'#9B2335',color:p.nhl?'#8B6914':'#333',
-          weight:p.nhl?2:1,fillOpacity:.9,pane:'markers'});
+          weight:p.nhl?2:1,fillOpacity:.9,pane:'vectors'});
       }
       return L.circleMarker(ll,{radius:5,fillColor:_colors.heritage,
-        color:'#333',weight:1,fillOpacity:.85,pane:'markers'});
+        color:'#333',weight:1,fillOpacity:.85,pane:'vectors'});
     },
     style:function(f){
       return f.properties._source==='nrhp'
-        ? {color:'#9B2335',weight:2,opacity:.85,fillColor:'#9B2335',fillOpacity:.12,dashArray:'4 4',pane:'areas'}
-        : {color:_colors.heritage,weight:2,opacity:.85,fillColor:_colors.heritage,fillOpacity:.15,pane:'areas'};
+        ? {color:'#9B2335',weight:2,opacity:.85,fillColor:'#9B2335',fillOpacity:.12,dashArray:'4 4',pane:'vectors'}
+        : {color:_colors.heritage,weight:2,opacity:.85,fillColor:_colors.heritage,fillOpacity:.15,pane:'vectors'};
     },
     onEachFeature:function(f,layer){
       var p=f.properties,s='';
@@ -2948,7 +3156,7 @@ function initMap(){
     return function(f){
       var c=ROAD_CLASS[f.properties._class]||ROAD_CLASS.historic;
       return {color:color,weight:c.w,opacity:.85,dashArray:c.dash,fill:false,
-        pane:'lines',lineCap:'round'};
+        pane:'vectors',lineCap:'round'};
     };
   }
   function roadPopup(p){
@@ -2996,7 +3204,7 @@ function initMap(){
   }
   _mapLayers.hist_shoreline=gj('hist_shoreline',{
     style:function(f){return{color:shoreColor(f.properties.year),weight:2.5,
-      opacity:.9,fill:false,pane:'lines'};}});
+      opacity:.9,fill:false,pane:'vectors'};}});
   bp(_mapLayers.hist_shoreline,function(p){
     return kicker('Historical shoreline')+'<b>'+esc(p.year||'Undated')+'</b>'+
       '<div class="popup-meta">NJDEP shoreline change series</div>';
@@ -3134,7 +3342,7 @@ function initMap(){
 
   /* ═══ Pine Barrens ═══ */
   _mapLayers.pnr=gj('pnr',{style:function(){return{color:_colors.pnr,weight:3,
-    opacity:.9,fillColor:_colors.pnr,fillOpacity:.07,dashArray:'12 5',pane:'areas'};}});
+    opacity:.9,fillColor:_colors.pnr,fillOpacity:.07,dashArray:'12 5',pane:'vectors'};}});
   bp(_mapLayers.pnr,function(p){
     var s=kicker('Pinelands National Reserve')+
       '<b>'+esc(p.name||'Pinelands National Reserve')+'</b>';
@@ -3155,7 +3363,7 @@ function initMap(){
   _mapLayers.pinelands_mgmt=gj('pinelands_mgmt',{
     style:function(f){
       var c=MGMT_TINT[f.properties.name]||_colors.pinelands_mgmt;
-      return{color:c,weight:1.5,opacity:.85,fillColor:c,fillOpacity:.25,pane:'areas'};
+      return{color:c,weight:1.5,opacity:.85,fillColor:c,fillOpacity:.25,pane:'vectors'};
     }});
   bp(_mapLayers.pinelands_mgmt,function(p){
     var s=kicker('Pinelands management area')+
@@ -3165,12 +3373,91 @@ function initMap(){
     return s;
   });
 
+  /* ═══ Significant Habitat ═══ */
+  var LNDR={5:'Rank 5 \u2014 federally listed species',
+            4:'Rank 4 \u2014 State endangered',
+            3:'Rank 3 \u2014 State threatened',
+            2:'Rank 2 \u2014 special concern',
+            1:'Rank 1 \u2014 species occurrence'};
+  var RANK_TONE={5:'#5B2C6F',4:'#7D3C98',3:'#A569BD',2:'#C39BD3',1:'#D7BDE2'};
+  _mapLayers.sig_habitat=gj('sig_habitat',{
+    style:function(f){
+      var c=RANK_TONE[f.properties.rank]||_colors.sig_habitat;
+      return{color:c,weight:1.2,opacity:.85,fillColor:c,fillOpacity:.3,pane:'vectors'};
+    }});
+  bp(_mapLayers.sig_habitat,function(p){
+    var s=kicker('Significant habitat \u2014 NJDEP Landscape Project v'+(p.version||'3.4'))+
+      '<b>'+esc(LNDR[p.rank]||('Rank '+p.rank))+'</b>';
+    s+=row('Region',p.region);
+    s+=row('Land cover',p.landCover||p.coverType);
+    if(p.acres)s+=row('Patch',Math.round(p.acres).toLocaleString()+' acres');
+    s+=chips([['riparian',p.riparian],['forest core',p.forestCore]]);
+    s+='<div class="popup-meta" style="margin-top:4px">Rank reflects the '+
+       'highest-status species documented using the patch.</div>';
+    return s;
+  });
+
+  _mapLayers.stream_habitat=gj('stream_habitat',{
+    style:function(f){
+      var c=RANK_TONE[f.properties.rank]||_colors.stream_habitat;
+      return{color:c,weight:3,opacity:.9,fill:false,pane:'vectors',lineCap:'round'};
+    }});
+  bp(_mapLayers.stream_habitat,function(p){
+    var s=kicker('Stream habitat \u2014 Landscape Project')+
+      '<b>'+esc(p.name||'Unnamed reach')+'</b>';
+    s+=row('Rank',LNDR[p.rank]||p.rank);
+    s+=row('Region',p.region);
+    return s;
+  });
+
+  var VP_STATUS={C:'Confirmed vernal pool',P:'Potential vernal pool',
+                 D:'Documented, not field verified'};
+  _mapLayers.vernal_pools=gjCluster('vernal_pools',{
+    pointToLayer:glyph(_colors.vernal_pools,
+      '<ellipse cx="12" cy="13" rx="7" ry="4.5" fill="none" stroke="#fff" stroke-width="1.6"/>'+
+      '<path d="M12 4v5" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>',20),
+    style:function(){return{color:_colors.vernal_pools,weight:1.2,opacity:.8,
+      fillColor:_colors.vernal_pools,fillOpacity:.25,pane:'vectors'};},
+    onEachFeature:popupOn(function(p){
+      var pool=p._kind==='pool';
+      var s=kicker(pool?'Vernal pool':'Vernal habitat')+
+        '<b>'+esc(pool?(VP_STATUS[p.status]||p.status||'Vernal pool')
+                      :(LNDR[p.rank]||'Vernal habitat'))+'</b>';
+      s+=row('Region',p.region);
+      if(p.acres)s+=row('Area',Math.round(p.acres).toLocaleString()+' acres');
+      s+=row('ID',p.code);
+      return s;
+    })},14);
+
+  _mapLayers.critical_habitat=gj('critical_habitat',{
+    style:function(f){
+      var line=f.geometry&&f.geometry.type&&f.geometry.type.indexOf('Line')>=0;
+      return line
+        ? {color:_colors.critical_habitat,weight:4,opacity:.9,fill:false,pane:'vectors',lineCap:'round'}
+        : {color:_colors.critical_habitat,weight:2,opacity:.9,
+           fillColor:_colors.critical_habitat,fillOpacity:.18,dashArray:'6 3',pane:'vectors'};
+    },
+    pointToLayer:cm(_colors.critical_habitat,6)});
+  bp(_mapLayers.critical_habitat,function(p){
+    var s=kicker('ESA designated critical habitat \u2014 '+
+      (p._source==='nmfs'?'NOAA Fisheries':'USFWS'))+
+      '<b>'+esc(p.name||'Critical habitat')+'</b>';
+    if(p.sciName)s+='<div class="popup-row" style="font-style:italic;color:#666">'+esc(p.sciName)+'</div>';
+    s+=row('Listing',p.listing||p.status);
+    s+=row('Population',p.entity);
+    s+=row('Unit',p.unit);
+    s+=row('Habitat type',p.habitatType);
+    s+=row('Effective',p.effective);
+    s+=links(link(p.url,'InPort record'));
+    return s;
+  });
+
   /* ═══ Marine & Estuarine ═══ */
   var MPA_TONE={Federal:'#00527A',State:'#00857A',Partnership:'#6A4C93',Local:'#8B7355'};
   _mapLayers.mpa=gj('mpa',{
     style:function(f){
       var c=MPA_TONE[f.properties.govLevel]||_colors.mpa;
-      return{color:c,weight:2,opacity:.9,fillColor:c,fillOpacity:.16,pane:'areas'};
+      return{color:c,weight:2,opacity:.9,fillColor:c,fillOpacity:.16,pane:'vectors'};
     }});
   bp(_mapLayers.mpa,function(p){
     var s=kicker('Marine protected area — NOAA inventory')+
@@ -3213,7 +3500,7 @@ function initMap(){
   _mapLayers.shellfish=gj('shellfish',{
     style:function(f){
       var c=shellfishTone(f.properties.status);
-      return{color:c,weight:1,opacity:.7,fillColor:c,fillOpacity:.22,pane:'areas'};
+      return{color:c,weight:1,opacity:.7,fillColor:c,fillOpacity:.22,pane:'vectors'};
     }});
   bp(_mapLayers.shellfish,function(p){
     var s=kicker('Shellfish harvest classification')+
@@ -3255,7 +3542,7 @@ function initMap(){
   _mapLayers.wetlands_osm=gj('wetlands_osm',{
     style:function(f){
       var c=WETLAND_TONE[f.properties.wetland]||_colors.wetlands_osm;
-      return{color:c,weight:1,opacity:.7,fillColor:c,fillOpacity:.3,pane:'areas'};
+      return{color:c,weight:1,opacity:.7,fillColor:c,fillOpacity:.3,pane:'vectors'};
     },
     pointToLayer:cm(_colors.wetlands_osm,4)});
   bp(_mapLayers.wetlands_osm,function(p){
@@ -3270,7 +3557,7 @@ function initMap(){
   /* ═══ Wildlife ═══ */
   _mapLayers.hotspots=gj('hotspots',{
     pointToLayer:function(f,ll){return L.circleMarker(ll,{radius:7,
-      fillColor:_colors.hotspots,color:'#fff',weight:2,fillOpacity:.9,pane:'markers'});}});
+      fillColor:_colors.hotspots,color:'#fff',weight:2,fillOpacity:.9,pane:'vectors'});}});
   bp(_mapLayers.hotspots,function(p){
     var s=kicker('eBird hotspot')+'<b>'+esc(p.name||'Hotspot')+'</b>';
     s+='<div class="popup-meta">'+p.numSpecies+' species all-time'+
@@ -3281,7 +3568,7 @@ function initMap(){
 
   _mapLayers.inat_rare=gjCluster('inat_rare',{
     pointToLayer:function(f,ll){return L.circleMarker(ll,{radius:6,
-      fillColor:_colors.inat_rare,color:'#fff',weight:2,fillOpacity:.9,pane:'markers'});},
+      fillColor:_colors.inat_rare,color:'#fff',weight:2,fillOpacity:.9,pane:'vectors'});},
     onEachFeature:popupOn(function(p){
       var s=kicker('Threatened species observation')+'<b>'+esc(p.name||p.sciName)+'</b>';
       if(p.sciName)s+='<div class="popup-row" style="font-style:italic;color:#666">'+esc(p.sciName)+'</div>';
@@ -3295,7 +3582,7 @@ function initMap(){
     showCoverageOnHover:false,iconCreateFunction:clusterIcon});
   gj('ebird_obs',{
     pointToLayer:function(f,ll){return L.circleMarker(ll,{radius:4,
-      fillColor:_colors.ebird_obs,color:'#fff',weight:1,fillOpacity:.8,pane:'markers'});},
+      fillColor:_colors.ebird_obs,color:'#fff',weight:1,fillOpacity:.8,pane:'vectors'});},
     onEachFeature:function(f,layer){
       var p=f.properties,list=p.species_list||[];
       var s='<div style="max-width:320px">'+kicker('eBird observations')+
@@ -3326,7 +3613,7 @@ function initMap(){
   /* ═══ Live conditions ═══ */
   _mapLayers.wildfires=gj('wildfires',{
     style:function(){return{color:_colors.wildfires,weight:2,opacity:.9,
-      fillColor:_colors.wildfires,fillOpacity:.35,pane:'areas'};},
+      fillColor:_colors.wildfires,fillOpacity:.35,pane:'vectors'};},
     pointToLayer:cm(_colors.wildfires,7,'#fff')});
   bp(_mapLayers.wildfires,function(p){
     var s=kicker('Active wildfire — NIFC WFIGS')+
@@ -3343,7 +3630,7 @@ function initMap(){
     style:function(f){
       var c=SMOKE_TONE[f.properties.density]||'#DAA520';
       return{color:c,weight:1,opacity:.6,fillColor:c,fillOpacity:.2,
-        dashArray:'4 4',pane:'areas'};
+        dashArray:'4 4',pane:'vectors'};
     }});
   bp(_mapLayers.smoke,function(p){
     var c=SMOKE_TONE[p.density]||'#999';
@@ -3370,7 +3657,14 @@ function initMap(){
 
   /* ── Turn on defaults, frame the search area, drop the base marker ── */
   var defaults=__DEFAULTS_OBJ__;
-  for(var k in _mapLayers){if(defaults[k])_mapLayers[k].addTo(_map);}
+  for(var zi=0;zi<_zorder.length;zi++){
+    var dk=_zorder[zi];
+    if(defaults[dk]&&_mapLayers[dk])_mapLayers[dk].addTo(_map);
+  }
+  for(var k in _mapLayers){                      // rasters and anything unranked
+    if(defaults[k]&&!_map.hasLayer(_mapLayers[k]))_mapLayers[k].addTo(_map);
+  }
+  _restack();
   _map.fitBounds([[__SOUTH__,__WEST__],[__NORTH__,__EAST__]]);
 
   L.marker([__BASE_LAT__,__BASE_LNG__],{zIndexOffset:1000,
@@ -3381,12 +3675,87 @@ function initMap(){
         'margin-top:-3px;text-shadow:0 0 3px #fff,0 0 3px #fff">__BASE_LABEL__</div></div>'})
   }).addTo(_map);
 
+  /* Overlapping conservation polygons are the norm here — a vernal pool sits
+     inside significant habitat inside a refuge inside the Pinelands Reserve.
+     Leaflet's canvas reports only the topmost shape, so whichever layer is
+     drawn last wins the click and the rest are unreachable. Gather everything
+     under the cursor and show it all.
+
+     This is bound to the layers rather than the map: Leaflet's own popup
+     handler calls DomEvent.stop(), so the map's own click never fires once a
+     feature popup opens. Binding on the layers means we run just after that
+     popup opens and can replace it. */
+  function _multiClick(e){
+    var oe=e.originalEvent;
+    if(oe){ if(oe.__lbiMulti)return; oe.__lbiMulti=true; }
+    var pt=_map.latLngToLayerPoint(e.latlng),hits=[],cap=12;
+    for(var i=_zorder.length-1;i>=0&&hits.length<cap;i--){
+      var key=_zorder[i],ly=_mapLayers[key];
+      if(!ly||!_map.hasLayer(ly)||!ly.eachLayer)continue;
+      (function(k){
+        ly.eachLayer(function(l){
+          if(hits.length>=cap)return;
+          if(!l._containsPoint||!l.getPopup||!l.getPopup())return;
+          /* A shape only has projected geometry once it has been drawn. Markers
+             collapsed inside a cluster have none, and _containsPoint throws on
+             them — which previously killed this whole handler. */
+          if(!l._point&&!(l._parts&&l._parts.length)&&!(l._rings&&l._rings.length))return;
+          var inside=false;
+          try{inside=l._containsPoint(pt);}catch(err){return;}
+          if(inside)hits.push({key:k,html:l.getPopup().getContent()});
+        });
+      })(key);
+    }
+    if(hits.length<2)return;                 // one hit: its own popup is fine
+    var s='<div class="multi-head">'+hits.length+
+          (hits.length>=cap?'+':'')+' features here</div>';
+    for(var h=0;h<hits.length;h++){
+      s+='<div class="multi-item"><span class="multi-layer">'+
+         (_layerLabels[hits[h].key]||hits[h].key)+'</span>'+hits[h].html+'</div>';
+    }
+    _map.closePopup();
+    L.popup({maxWidth:350,maxHeight:420,autoPanPadding:[20,20]})
+      .setLatLng(e.latlng).setContent(s).openOn(_map);
+  }
+  for(var mk in _mapLayers){
+    if(_mapLayers[mk]&&typeof _mapLayers[mk].on==='function')
+      _mapLayers[mk].on('click',_multiClick);
+  }
+
   setTimeout(function(){_map.invalidateSize();},250);
+}
+
+/* Leaflet stacks by insertion order within a pane, so a layer switched on later
+   lands on top of everything and steals clicks from the smaller features under
+   it. Re-assert the intended order after any change. */
+function _restack(){
+  if(!_map)return;
+  for(var i=0;i<_zorder.length;i++){
+    var l=_mapLayers[_zorder[i]];
+    if(l&&_map.hasLayer(l)&&typeof l.bringToFront==='function')l.bringToFront();
+  }
 }
 
 function toggleMapLayer(key,on){
   if(!_map||!_mapLayers[key])return;
   if(on)_mapLayers[key].addTo(_map);else _map.removeLayer(_mapLayers[key]);
+  _restack();
+}
+
+/* Turn every layer in one sidebar category on or off together. */
+function setGroupLayers(group,on){
+  var boxes=document.querySelectorAll(
+    '.map-layer-toggle[data-group="'+group+'"] input[type=checkbox]');
+  for(var i=0;i<boxes.length;i++){
+    boxes[i].checked=on;
+    var key=boxes[i].getAttribute('data-layer');
+    if(_mapLayers[key]){
+      if(on)_mapLayers[key].addTo(_map);else _map.removeLayer(_mapLayers[key]);
+    }
+  }
+  _restack();
+  var d=document.querySelector('.map-layer-toggle[data-group="'+group+'"]');
+  if(on&&d&&d.closest('details'))d.closest('details').open=true;
 }
 
 function setAllMapLayers(on){
@@ -3394,7 +3763,7 @@ function setAllMapLayers(on){
   for(var i=0;i<boxes.length;i++){
     boxes[i].checked=on;
     toggleMapLayer(boxes[i].getAttribute('data-layer'),on);
-  }
+  }  _restack();
 }
 
 function resetMapLayers(){
@@ -3404,7 +3773,7 @@ function resetMapLayers(){
     var key=boxes[i].getAttribute('data-layer'),want=!!defaults[key];
     boxes[i].checked=want;
     toggleMapLayer(key,want);
-  }
+  }  _restack();
 }
 """
 
@@ -3455,7 +3824,7 @@ def build_nav(layers: dict) -> str:
             checked = " checked" if ld["on"] else ""
             dot_cls = "map-layer-dot raster" if is_raster else "map-layer-dot"
             items.append(
-                f'<label class="map-layer-toggle">'
+                f'<label class="map-layer-toggle" data-group="{group_key}">'
                 f'<input type="checkbox" data-layer="{key}"{checked}'
                 f' onchange="toggleMapLayer(\'{key}\',this.checked)">'
                 f'<span class="{dot_cls}" style="background:{ld["color"]}"></span>'
@@ -3475,9 +3844,24 @@ def build_nav(layers: dict) -> str:
         open_attr = " open" if any(
             LAYER_DEFS[k]["on"] for k, _ in by_group.get(group_key, [])
         ) else ""
+        n_layers = sum(1 for i in items if "map-layer-toggle" in i)
+        # Clicking a button inside <summary> would otherwise also toggle the
+        # <details> open/closed, so stop the event there.
+        acts = (
+            f'<span class="group-count">{n_layers}</span>'
+            f'<span class="group-acts">'
+            f'<button type="button" title="Turn on every layer in {group_label}" '
+            f'onclick="event.preventDefault();event.stopPropagation();'
+            f'setGroupLayers(\'{group_key}\',true)">ALL</button>'
+            f'<button type="button" title="Turn off every layer in {group_label}" '
+            f'onclick="event.preventDefault();event.stopPropagation();'
+            f'setGroupLayers(\'{group_key}\',false)">NONE</button>'
+            f'</span>'
+        )
         sections.append(
             f'<details class="layer-group"{open_attr}>'
-            f'<summary>{group_label}</summary>\n' + "\n".join(items) + "\n</details>"
+            f'<summary>{group_label}{acts}</summary>\n'
+            + "\n".join(items) + "\n</details>"
         )
     return "\n".join(sections)
 
@@ -3497,6 +3881,10 @@ def build_init_js(bbox: tuple, center: tuple, base_label: str,
         .replace("__TILE_CACHE__", json.dumps(tile_manifest or {},
                                               separators=(",", ":")))
         .replace("__TILE_ROOT__", json.dumps(tile_root))
+        .replace("__ZORDER__", json.dumps(stack_order(), separators=(",", ":")))
+        .replace("__LABELS__", json.dumps(
+            {k: v["label"] for k, v in LAYER_DEFS.items()},
+            separators=(",", ":")))
         .replace("__RASTER_DEFS__", json.dumps(rasters, separators=(",", ":")))
         .replace("__COLORS__", json.dumps(colors, separators=(",", ":")))
         .replace("__DEFAULTS_OBJ__", json.dumps(defaults, separators=(",", ":")))
@@ -3733,6 +4121,10 @@ FETCHERS = [
     ("forests",           fetch_forests,               "Forests (OSM)"),
     ("pnr",               fetch_pnr,                   "Pinelands National Reserve"),
     ("pinelands_mgmt",    fetch_pinelands_mgmt,        "Pinelands management areas"),
+    ("sig_habitat",       fetch_sig_habitat,           "Significant habitat (Landscape Project)"),
+    ("stream_habitat",    fetch_stream_habitat,        "Stream habitat"),
+    ("vernal_pools",      fetch_vernal_pools,          "Vernal pools & habitat"),
+    ("critical_habitat",  fetch_critical_habitat,      "ESA critical habitat"),
     ("mpa",               fetch_mpa,                   "Marine protected areas"),
     ("nerrs",             fetch_nerrs,                 "Estuarine research reserves"),
     ("shellfish",         fetch_shellfish,             "Shellfish classification"),
@@ -3791,6 +4183,7 @@ def cached_basemaps(tile_manifest: dict) -> list:
 
 def main():
     global SIMPLIFY_DEG, SIMPLIFY_DEG_FINE, SIMPLIFY_DEG_COARSE
+    global HABITAT_MIN_RANK
 
     parser = argparse.ArgumentParser(
         description="Build an interactive geospatial map centered on Long "
@@ -3861,6 +4254,12 @@ def main():
                              "--cache-tiles")
     parser.add_argument("--list-tile-sources", action="store_true",
                         help="Print the cacheable tile sources and exit")
+    parser.add_argument("--habitat-rank", type=int, default=HABITAT_MIN_RANK,
+                        choices=[1, 2, 3, 4, 5], metavar="1-5",
+                        help="Minimum NJDEP Landscape Project rank for the "
+                             f"significant-habitat layer (default {HABITAT_MIN_RANK}: "
+                             "State endangered and above). Lower values add a "
+                             "great many polygons")
     parser.add_argument("--simplify", type=float, default=SIMPLIFY_DEG,
                         metavar="DEG",
                         help="Geometry generalization tolerance in degrees "
@@ -3890,6 +4289,7 @@ def main():
 
     bbox = parse_bbox(BBOX_PRESETS.get(args.bbox, args.bbox))
     fire_bbox = parse_bbox(args.fire_bbox) if args.fire_bbox else None
+    HABITAT_MIN_RANK = args.habitat_rank
 
     try:
         zlo, _, zhi = args.tile_zooms.partition("-")
