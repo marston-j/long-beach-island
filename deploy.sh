@@ -32,6 +32,7 @@ python3 lbi_map.py \
   --title "Long Beach Island — Field Map" \
   --center-label "Ship Bottom" \
   --cache-tiles default --tile-zooms "$ISLAND_ZOOMS" \
+  --habitat-rank 4 \
   --page-link "region.html|Full region & Pine Barrens →" \
   $RENDER
 
@@ -43,6 +44,7 @@ python3 lbi_map.py \
   --title "LBI Region — Barnegat Bay to the Pine Barrens" \
   --center-label "Ship Bottom" \
   --cache-tiles default --tile-zooms "$REGION_ZOOMS" --max-tiles 40000 \
+  --habitat-rank 5 \
   --page-link "index.html|← Island detail map" \
   $RENDER
 

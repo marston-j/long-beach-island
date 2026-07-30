@@ -143,6 +143,39 @@ buildings themselves. Districts are a separate layer.
 | Pinelands Mgmt Areas | NJ Pinelands Commission | Preservation Area District, Forest Area, Agricultural Production, Regional Growth, Villages — tinted by class |
 | CHANJ Habitat Cores | NJDEP Environmental/107 — **raster** | Connecting Habitat Across New Jersey |
 
+### Significant Habitat
+
+| Layer | Source | Notes |
+|---|---|---|
+| Significant Habitat | NJDEP Landscape Project v3.4 — Marine, Atlantic Coastal, Pinelands and Delaware Bay regions | Species-based habitat, ranked 1–5 by the highest-status species documented using the patch. Filtered to rank 4+ and tinted by rank |
+| Vernal Pools & Habitat | NJDEP Landscape Project v3.4 | Confirmed and potential vernal pools plus the surrounding vernal habitat — clustered |
+| Stream Habitat | NJDEP Landscape Project v3.4 | Stream reaches documented as habitat for listed species |
+| ESA Critical Habitat | USFWS + NOAA Fisheries designated critical habitat | Includes the Atlantic sturgeon New York Bight distinct population segment |
+
+**On the USFWS New York Bight report.** *Significant Habitats and Habitat
+Complexes of the New York Bight Watershed* (USFWS, 1997) covers the watershed
+from Cape May to Montauk, so Long Beach Island sits squarely inside it — but it
+was published as narrative descriptions and figures, with **no accompanying GIS
+dataset**; nothing is registered on ScienceBase or ArcGIS Online. The
+authoritative spatial equivalents for this region, all included above, are the
+NJDEP Landscape Project ranking, ESA designated critical habitat, Natural
+Heritage Priority Sites, and the Conservation Focal Areas.
+
+The Landscape Project is large — 152,000 polygons for the Pinelands region
+alone across the regional bbox — so the layer is filtered to the ranks carrying
+regulatory weight. `--habitat-rank` sets the floor:
+
+| Rank | Meaning |
+|---|---|
+| 5 | Habitat for a federally listed species |
+| 4 | Habitat for a State endangered species (**default**) |
+| 3 | Habitat for a State threatened species |
+| 2 | Habitat for a species of special concern |
+| 1 | Species occurrence area |
+
+The island build is complete at rank 4; the regional build uses rank 5 and is
+capped, which the build log reports.
+
 ### Marine & Estuarine
 
 | Layer | Source | Notes |
@@ -184,6 +217,22 @@ buildings themselves. Districts are a separate layer.
 |---|---|
 | NOAA Nautical Chart | NOAA ENC, also available as a basemap |
 | Bathymetry | NOAA NCEI DEM mosaic |
+
+## Reading the Map
+
+**Clicking overlapping features.** Conservation polygons nest heavily here — a
+vernal pool inside significant habitat inside a refuge inside the Pinelands
+National Reserve. A click gathers *every* feature under the cursor and lists
+them together, most specific first, rather than showing only whichever polygon
+happens to be drawn on top.
+
+**Layer stacking.** Layers are drawn in a fixed order — broad regional extents
+at the bottom, specific features above, lines above those, point markers on top
+— and that order is reasserted whenever you toggle something, so enabling a
+large area layer never buries the small ones underneath it.
+
+**Sidebar controls.** Each category has its own ALL / NONE buttons next to its
+layer count, plus global Reset / All on / All off at the top.
 
 ## Working Offline (Local Tile Cache)
 
@@ -287,6 +336,7 @@ python3 lbi_map.py --bbox lbi-region --out site/region.html \
 | `--fire-bbox` | Wider bbox for the wildfire query, to catch fires just outside the map |
 | `--only` | Comma-separated layer keys to refetch; everything else comes from cache |
 | `--simplify` | Geometry generalization tolerance in degrees (default `0.00005`, ~6 m). Raise it to shrink the page on a large bbox; `0` keeps full-resolution geometry |
+| `--habitat-rank` | Minimum Landscape Project habitat rank, 1–5 (default 4) |
 | `--render-only` | Rebuild the HTML from cache with zero network calls |
 | `--page-link` | Add a sidebar header link, `HREF\|LABEL`. Repeatable |
 
