@@ -44,7 +44,7 @@ python3 lbi_map.py \
   --title "LBI Region — Barnegat Bay to the Pine Barrens" \
   --center-label "Ship Bottom" \
   --cache-tiles default --tile-zooms "$REGION_ZOOMS" --max-tiles 40000 \
-  --habitat-rank 5 \
+  --habitat-rank 5 --skip sig_habitat \
   --page-link "index.html|← Island detail map" \
   $RENDER
 

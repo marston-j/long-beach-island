@@ -3801,8 +3801,9 @@ def _count_for(key: str, layers: dict) -> int:
     return len(layers.get(key, EMPTY_FC).get("features", []))
 
 
-def build_nav(layers: dict) -> str:
+def build_nav(layers: dict, skip: set | None = None) -> str:
     """Grouped, collapsible layer toggles."""
+    skip = skip or set()
     by_group: dict[str, list] = {g: [] for g, _ in LAYER_GROUPS}
     for key, ld in LAYER_DEFS.items():
         by_group.setdefault(ld["group"], []).append((key, ld))
@@ -3814,6 +3815,8 @@ def build_nav(layers: dict) -> str:
             is_raster = ld.get("kind") == "raster"
             if is_raster:
                 count_str = "live"
+            elif key in skip:
+                continue           # deliberately excluded from this build
             else:
                 count = _count_for(key, layers)
                 # Hide empty layers unless they default on, so the absence is
@@ -3967,7 +3970,8 @@ def build_standalone(layers: dict, bbox: tuple, center: tuple, *,
                      default_basemap: str,
                      tile_manifest: dict | None = None,
                      vendored: bool = False,
-                     page_links: list | None = None) -> str:
+                     page_links: list | None = None,
+                     skip: set | None = None) -> str:
     s, w, n, e = bbox
     subtitle = (
         f"Search area {s:.2f},{w:.2f} to {n:.2f},{e:.2f} &middot; "
@@ -3995,7 +3999,7 @@ def build_standalone(layers: dict, bbox: tuple, center: tuple, *,
         .replace("__FONTS__", fonts)
         .replace("__LEAFLET__", libs)
         .replace("__CSS__", MAP_CSS)
-        .replace("__NAV__", build_nav(layers))
+        .replace("__NAV__", build_nav(layers, skip))
         .replace("__CREDITS__", CREDITS)
         .replace("__DATA__", build_data_script(layers))
         .replace("__INIT__", build_init_js(bbox, center, base_label, zoom,
@@ -4011,7 +4015,7 @@ def build_standalone(layers: dict, bbox: tuple, center: tuple, *,
 def inject_map_tab(target: Path, layers: dict, bbox: tuple, center: tuple, *,
                    base_label: str, zoom: int, default_basemap: str,
                    tile_manifest: dict | None = None,
-                   vendored: bool = False):
+                   vendored: bool = False, skip: set | None = None):
     """Add a Map tab to a field-checklist page built the Gulf Islands way."""
     backup = target.with_name(".index_pre_map.html")
 
@@ -4041,7 +4045,7 @@ def inject_map_tab(target: Path, layers: dict, bbox: tuple, center: tuple, *,
         )
 
     nav_html = ('<div class="nav-links" id="nav-map" style="display:none">\n'
-                + build_nav(layers) + "\n</div>")
+                + build_nav(layers, skip) + "\n</div>")
     html = html.replace("</nav>", nav_html + "\n</nav>", 1)
 
     panel_html = ('<div class="panel" id="panel-map"><div id="leaflet-map"></div>'
@@ -4223,6 +4227,10 @@ def main():
     parser.add_argument("--only", default=None,
                         help="Comma-separated layer keys to fetch; everything "
                              "else comes from cache")
+    parser.add_argument("--skip", default=None,
+                        help="Comma-separated layer keys to leave out entirely. "
+                             "Useful for layers whose service is too slow or "
+                             "whose detail is meaningless at a regional bbox")
     parser.add_argument("--cache-tiles", nargs="?", const="default",
                         default=None, metavar="LAYERS",
                         help="Download basemap and overlay tiles into "
@@ -4340,6 +4348,10 @@ def main():
 
     only = ({k.strip() for k in args.only.split(",") if k.strip()}
             if args.only else None)
+    skip = {k.strip() for k in (args.skip or "").split(",") if k.strip()}
+    unknown = skip - set(LAYER_DEFS)
+    if unknown:
+        parser.error(f"--skip names unknown layers: {', '.join(sorted(unknown))}")
 
     log.info("=" * 64)
     log.info("Long Beach Island Geospatial Map Builder")
@@ -4356,6 +4368,10 @@ def main():
     log.info("\nStep 1/3  Vector layers")
     total = len(FETCHERS)
     for i, (key, fn, label) in enumerate(FETCHERS, 1):
+        if key in skip:
+            log.info("  [%2d/%d] %s — skipped", i, total, label)
+            layers[key] = EMPTY_FC
+            continue
         if args.render_only:
             layers[key] = _from_cache_only(key, fn, bbox, cache, label)
             continue
@@ -4455,14 +4471,16 @@ def main():
         inject_map_tab(args.target.resolve(), layers, bbox, center,
                        base_label=args.center_label, zoom=args.zoom,
                        default_basemap=basemap,
-                       tile_manifest=tile_manifest, vendored=vendored)
+                       tile_manifest=tile_manifest, vendored=vendored,
+                       skip=skip)
         final = args.target.resolve()
     else:
         html = build_standalone(layers, bbox, center, title=args.title,
                                 base_label=args.center_label, zoom=args.zoom,
                                 default_basemap=basemap,
                                 tile_manifest=tile_manifest,
-                                vendored=vendored, page_links=page_links)
+                                vendored=vendored, page_links=page_links,
+                                skip=skip)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(html, encoding="utf-8")
         final = out_path.resolve()

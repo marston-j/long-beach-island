@@ -173,8 +173,10 @@ regulatory weight. `--habitat-rank` sets the floor:
 | 2 | Habitat for a species of special concern |
 | 1 | Species occurrence area |
 
-The island build is complete at rank 4; the regional build uses rank 5 and is
-capped, which the build log reports.
+The island build is complete at rank 4. The regional build omits this layer via
+`--skip sig_habitat`: the hosted service paginates a regional bbox at roughly a
+thousand polygons per several minutes, and individual habitat patches are not
+legible at that extent anyway. Use the island map for habitat work.
 
 ### Marine & Estuarine
 
@@ -337,6 +339,7 @@ python3 lbi_map.py --bbox lbi-region --out site/region.html \
 | `--only` | Comma-separated layer keys to refetch; everything else comes from cache |
 | `--simplify` | Geometry generalization tolerance in degrees (default `0.00005`, ~6 m). Raise it to shrink the page on a large bbox; `0` keeps full-resolution geometry |
 | `--habitat-rank` | Minimum Landscape Project habitat rank, 1–5 (default 4) |
+| `--skip` | Comma-separated layer keys to leave out of a build entirely |
 | `--render-only` | Rebuild the HTML from cache with zero network calls |
 | `--page-link` | Add a sidebar header link, `HREF\|LABEL`. Repeatable |
 
