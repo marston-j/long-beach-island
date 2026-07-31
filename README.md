@@ -236,6 +236,42 @@ large area layer never buries the small ones underneath it.
 **Sidebar controls.** Each category has its own ALL / NONE buttons next to its
 layer count, plus global Reset / All on / All off at the top.
 
+## Phones
+
+The map fills the screen and the layer list is a sheet that slides up over it,
+opened by a floating **Layers** button that shows how many are currently on.
+Stacking the panel above the map instead left the scroll area with almost no
+height — one category header and then the credits — so layers could not be
+picked at all. Rows and checkboxes are sized for a thumb, the source list stays
+collapsed behind a tap, and the sheet closes by tapping the map, the handle area
+or the ×.
+
+Page weight matters more here than anywhere: see `--defer-large` below.
+
+## Deferred Layer Data
+
+`--defer-large KB` writes any layer bigger than the threshold to
+`data/<key>.json` instead of embedding it, and loads it when needed — at map
+init for layers that are on by default, on first tap for the rest. The layer
+object is built up front with its styling and popups already wired, so the
+arriving data is simply poured in.
+
+This is the difference between a page a phone can open and one it cannot:
+
+| Page | Embedded | With `--defer-large 200` |
+|---|---|---|
+| Island | 8.65 MB | **1.63 MB** |
+| Region | 21.3 MB | **1.52 MB** |
+
+The map paints in about a fifth of a second and the geometry streams in behind
+it. Layers left off stay unfetched until asked for — on the regional page that
+is thirteen of twenty deferred files never downloaded in a default session.
+
+It requires the page to be served over http. Opening the HTML straight off disk
+blocks `fetch`, and those layers will report a failure in the console and clear
+their checkbox. Local builds leave it off by default for that reason;
+`deploy.sh` turns it on.
+
 ## Working Offline (Local Tile Cache)
 
 Vector data is embedded straight into the page, but basemaps and raster
@@ -340,6 +376,7 @@ python3 lbi_map.py --bbox lbi-region --out site/region.html \
 | `--simplify` | Geometry generalization tolerance in degrees (default `0.00005`, ~6 m). Raise it to shrink the page on a large bbox; `0` keeps full-resolution geometry |
 | `--habitat-rank` | Minimum Landscape Project habitat rank, 1–5 (default 4) |
 | `--skip` | Comma-separated layer keys to leave out of a build entirely |
+| `--defer-large` | Write layers over this size (KB) to `data/` and load them on demand; `0` disables (default) |
 | `--render-only` | Rebuild the HTML from cache with zero network calls |
 | `--page-link` | Add a sidebar header link, `HREF\|LABEL`. Repeatable |
 

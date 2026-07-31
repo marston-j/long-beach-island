@@ -2489,7 +2489,7 @@ def local_head(tile_root: str = "tiles/") -> tuple:
         "https://mapsdep.nj.gov https://fwsprimary.wim.usgs.gov "
         "https://hazards.fema.gov;"
         "font-src 'self';"
-        "connect-src 'none';"
+        "connect-src 'self';"
         '"/>'
     )
     fonts = '<link rel="stylesheet" href="lib/fonts.css"/>'
@@ -2611,10 +2611,68 @@ body{margin:0;font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Sego
 .leaflet-control-layers-toggle svg{width:20px;height:20px;display:block}
 .leaflet-control-layers{border-radius:6px!important;box-shadow:0 2px 8px rgba(0,0,0,.18)!important}
 .leaflet-control-layers-list{font-size:12px}
+.sheet-toggle{display:none}
+.sheet-scrim{display:none}
+
+/* Phones: the map takes the whole screen and the layer list becomes a sheet
+   that slides up over it. Stacking the two vertically left the scroll area
+   with almost no height — one group header and then the credits — which made
+   the layers unusable. */
 @media(max-width:760px){
-  .shell{flex-direction:column}
-  .sidebar{width:100%;flex:0 0 auto;max-height:44vh;border-right:none;border-bottom:1px solid #e2ded6}
+  .shell{flex-direction:column;position:relative}
+  .map-wrap{position:absolute;inset:0}
+  .sidebar{position:absolute;left:0;right:0;bottom:0;z-index:1200;width:auto;
+    max-height:86vh;height:86vh;border-right:none;border-top:1px solid #d9d3c9;
+    border-radius:14px 14px 0 0;box-shadow:0 -4px 24px rgba(0,0,0,.22);
+    transform:translateY(100%);transition:transform .22s ease-out;
+    padding-bottom:env(safe-area-inset-bottom)}
+  .sidebar.open{transform:translateY(0)}
+  .sidebar header{padding:8px 16px 8px;position:relative}
+  .sidebar header::before{content:'';position:absolute;top:5px;left:50%;
+    transform:translateX(-50%);width:38px;height:4px;border-radius:2px;background:#d8d2c8}
+  .sidebar h1{font-size:14px;margin-top:6px}
+  .sidebar .sub{font-size:10px}
+  .layer-scroll{-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+
+  /* Touch targets: 13px checkboxes and 5px rows are unusable with a thumb. */
+  .map-layer-toggle{padding:11px 16px 11px 24px;font-size:13.5px;gap:11px;
+    border-bottom:1px solid #f6f3ee}
+  .map-layer-toggle input[type=checkbox]{width:20px;height:20px}
+  .map-layer-dot{width:12px;height:12px}
+  .map-layer-count{font-size:12px}
+  .layer-group > summary{padding:13px 16px;font-size:12px}
+  .group-acts button{padding:6px 11px;font-size:10px}
+  .layer-tools{padding:10px 16px;gap:8px}
+  .layer-tools button{padding:10px 6px;font-size:12.5px}
+  .page-links a{padding:6px 11px;font-size:12px}
+
+  /* The source list is long; keep it out of the way until asked for. */
+  .credits{max-height:2.9em;overflow:hidden;position:relative;cursor:pointer}
+  .credits.expanded{max-height:none}
+  .credits::after{content:'sources \25BE';position:absolute;right:0;bottom:0;
+    padding:0 10px 0 34px;color:var(--accent);font-weight:600;
+    background:linear-gradient(90deg,rgba(255,255,255,0),#fff 30px)}
+  .credits.expanded::after{content:''}
+
+  /* Floating button that opens the sheet. */
+  .sheet-toggle{display:flex;align-items:center;gap:7px;position:absolute;
+    left:10px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:1100;
+    background:#fff;border:1px solid #d9d3c9;border-radius:22px;
+    box-shadow:0 2px 10px rgba(0,0,0,.22);padding:10px 16px;font:inherit;
+    font-size:13.5px;font-weight:600;color:#333;cursor:pointer}
+  .sheet-toggle .n{color:var(--accent)}
+  .sidebar.open ~ .sheet-toggle{display:none}
+  .sheet-scrim{display:block;position:absolute;inset:0;z-index:1150;
+    background:rgba(0,0,0,.28);opacity:0;pointer-events:none;transition:opacity .2s}
+  .sheet-scrim.show{opacity:1;pointer-events:auto}
+  /* Keep Leaflet's scale bar and attribution clear of the Layers button. */
+  .leaflet-bottom.leaflet-left{bottom:54px}
+  .leaflet-control-attribution{font-size:9px}
+  .sheet-close{position:absolute;top:8px;right:10px;width:34px;height:34px;
+    border:none;background:transparent;font-size:22px;line-height:1;color:#888;
+    cursor:pointer;z-index:2}
 }
+@media(min-width:761px){ .sheet-close{display:none} }
 """
 
 # Injection mode reuses the host page's own layout; keep the map tall and let
@@ -2643,7 +2701,7 @@ CSP = (
     "https://inaturalist-open-data.s3.amazonaws.com "
     "https://static.inaturalist.org https://upload.wikimedia.org;"
     "font-src https://fonts.gstatic.com;"
-    "connect-src 'none';"
+    "connect-src 'self';"
     '"/>'
 )
 
@@ -2677,6 +2735,7 @@ LEAFLET_CDN = (
 MAP_JS_TEMPLATE = r"""
 var _map=null,_mapLayers={},_rasterDefs=__RASTER_DEFS__,_colors=__COLORS__;
 var _tileCache=__TILE_CACHE__,_tileRoot=__TILE_ROOT__,_zorder=__ZORDER__;
+var _deferred=__DEFERRED__,_deferredState={};
 var _layerLabels=__LABELS__;
 
 /* Tiles pre-downloaded by --cache-tiles live at tiles/<key>/<z>/<x>/<y>.png.
@@ -2906,7 +2965,10 @@ function initMap(){
     var cg=L.markerClusterGroup({maxClusterRadius:50,showCoverageOnHover:false,
       spiderfyOnMaxZoom:true,disableClusteringAtZoom:atZoom||15,
       iconCreateFunction:clusterIcon});
-    gj(key,opts).addTo(cg);
+    cg.addLayer(gj(key,opts));
+    /* A cluster group has no addData(); deferred data arrives as a fresh
+       GeoJSON layer built with the same options and handed to the cluster. */
+    cg._lbiFill=function(data){cg.addLayer(L.geoJSON(data,opts));};
     return cg;
   }
   /* Bind popups through onEachFeature so a layer can be swapped between a
@@ -3687,6 +3749,10 @@ function initMap(){
   _restack();
   _map.fitBounds([[__SOUTH__,__WEST__],[__NORTH__,__EAST__]]);
 
+  /* Layers that are on by default but held back from the HTML: fetch them now
+     so the map paints immediately and the geometry streams in behind it. */
+  for(var dk in _deferred){if(defaults[dk])_loadDeferred(dk);}
+
   L.marker([__BASE_LAT__,__BASE_LNG__],{zIndexOffset:1000,
     icon:L.divIcon({className:'base-star',iconSize:[60,30],iconAnchor:[30,15],
       html:'<div style="text-align:center"><span style="font-size:15px;color:#1A6B9A;'+
@@ -3756,8 +3822,46 @@ function _restack(){
   }
 }
 
+/* Layers held back from the page load are fetched the first time they are
+   switched on. The layer object already exists with its styling and popups
+   wired, so the data is simply poured into it. */
+function _loadDeferred(key,cb){
+  if(_deferredState[key]==='ready'){cb&&cb();return;}
+  var lbl=document.querySelector('.map-layer-toggle input[data-layer="'+key+'"]');
+  var row=lbl&&lbl.parentNode,cnt=row&&row.querySelector('.map-layer-count');
+  if(_deferredState[key]==='loading')return;
+  _deferredState[key]='loading';
+  if(cnt){cnt.dataset.n=cnt.textContent;cnt.textContent='…';}
+  fetch(_deferred[key])
+    .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
+    .then(function(gjson){
+      var ly=_mapLayers[key];
+      if(typeof ly._lbiFill==='function')ly._lbiFill(gjson);
+      else ly.addData(gjson);
+      _deferredState[key]='ready';
+      if(_map&&_map.hasLayer(ly))_restack();
+      if(cnt)cnt.textContent=cnt.dataset.n||cnt.textContent;
+      cb&&cb();
+    })
+    .catch(function(err){
+      _deferredState[key]=null;
+      if(cnt)cnt.textContent=cnt.dataset.n||'!';
+      if(lbl)lbl.checked=false;
+      /* Opening the page straight off disk blocks fetch; it needs a server. */
+      console.warn('Could not load '+key+': '+err.message);
+    });
+}
+
 function toggleMapLayer(key,on){
   if(!_map||!_mapLayers[key])return;
+  if(on&&_deferred[key]&&_deferredState[key]!=='ready'){
+    _loadDeferred(key,function(){
+      _mapLayers[key].addTo(_map);
+      _restack();
+      if(typeof updateSheetCount==='function')updateSheetCount();
+    });
+    return;
+  }
   if(on)_mapLayers[key].addTo(_map);else _map.removeLayer(_mapLayers[key]);
   _restack();
 }
@@ -3892,7 +3996,8 @@ def build_nav(layers: dict, skip: set | None = None) -> str:
 def build_init_js(bbox: tuple, center: tuple, base_label: str,
                   zoom: int, default_basemap: str,
                   tile_manifest: dict | None = None,
-                  tile_root: str = "tiles/") -> str:
+                  tile_root: str = "tiles/",
+                  deferred: dict | None = None) -> str:
     s, w, n, e = bbox
     clat, clng = (s + n) / 2, (w + e) / 2
     colors = {k: v["color"] for k, v in LAYER_DEFS.items()}
@@ -3904,6 +4009,7 @@ def build_init_js(bbox: tuple, center: tuple, base_label: str,
         .replace("__TILE_CACHE__", json.dumps(tile_manifest or {},
                                               separators=(",", ":")))
         .replace("__TILE_ROOT__", json.dumps(tile_root))
+        .replace("__DEFERRED__", json.dumps(deferred or {}, separators=(",", ":")))
         .replace("__ZORDER__", json.dumps(stack_order(), separators=(",", ":")))
         .replace("__LABELS__", json.dumps(
             {k: v["label"] for k, v in LAYER_DEFS.items()},
@@ -3930,16 +4036,41 @@ def build_init_js(bbox: tuple, center: tuple, base_label: str,
     )
 
 
-def build_data_script(layers: dict) -> str:
-    """One `mapData_<key>` global per vector layer, minified."""
+def build_data_script(layers: dict, *, defer_bytes: int = 0,
+                      data_dir: Path | None = None) -> tuple:
+    """Emit one `mapData_<key>` global per vector layer.
+
+    Layers that are off by default and larger than `defer_bytes` are written to
+    `data/<key>.json` instead and loaded the first time they are switched on.
+    On a phone this is the difference between an 8.6 MB page and a 3.4 MB one,
+    since the geometry nobody has asked for yet dominates the payload.
+
+    Returns (script, deferred) where deferred maps layer key -> relative URL.
+    """
     keys = set()
     for key in vector_keys():
         keys.add("beaches" if key.startswith("beaches_") else key)
-    lines = []
+
+    lines, deferred = [], {}
     for key in sorted(keys):
         gj = layers.get(key, EMPTY_FC)
-        lines.append(f"var mapData_{key}={json.dumps(gj, separators=(',', ':'))};")
-    return "\n".join(lines)
+        blob = json.dumps(gj, separators=(",", ":"))
+        # `beaches` backs two toggles from one payload, so leave it inline.
+        can_defer = (defer_bytes and data_dir is not None
+                     and key != "beaches"
+                     and len(blob) > defer_bytes
+                     and gj.get("features"))
+        if can_defer:
+            data_dir.mkdir(parents=True, exist_ok=True)
+            (data_dir / f"{key}.json").write_text(blob, encoding="utf-8")
+            deferred[key] = f"data/{key}.json"
+            lines.append(f'var mapData_{key}={{"type":"FeatureCollection",'
+                         f'"features":[]}};')
+            log.info("    deferred %-18s %6.0f KB -> data/%s.json",
+                     key, len(blob) / 1024, key)
+        else:
+            lines.append(f"var mapData_{key}={blob};")
+    return "\n".join(lines), deferred
 
 
 # ─── Standalone page ──────────────────────────────────────────────
@@ -3948,8 +4079,10 @@ STANDALONE_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="color-scheme" content="light"/>
 <title>__TITLE__</title>
+<link rel="icon" href="data:,"/>
 __CSP__
 __FONTS__
 __LEAFLET__
@@ -3957,7 +4090,9 @@ __LEAFLET__
 </head>
 <body>
 <div class="shell">
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
+    <button class="sheet-close" type="button" aria-label="Close layer list"
+            onclick="toggleSheet(false)">&times;</button>
     <header>
       <h1>__TITLE__</h1>
       <p class="sub">__SUBTITLE__</p>
@@ -3971,14 +4106,48 @@ __PAGELINKS__
     <div class="layer-scroll">
 __NAV__
     </div>
-    <div class="credits">__CREDITS__</div>
+    <div class="credits" onclick="this.classList.toggle('expanded')">__CREDITS__</div>
   </aside>
+  <div class="sheet-scrim" id="sheet-scrim" onclick="toggleSheet(false)"></div>
+  <button class="sheet-toggle" type="button" onclick="toggleSheet(true)">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="12 2 22 8.5 12 15 2 8.5"/><polyline points="2 12 12 18.5 22 12"/>
+    </svg>Layers <span class="n" id="sheet-count"></span></button>
   <div class="map-wrap"><div id="leaflet-map"></div></div>
 </div>
 <script>
 __DATA__
 __INIT__
-document.addEventListener('DOMContentLoaded',initMap);
+/* Bottom-sheet layer list for phones. The sheet is CSS-hidden on desktop, so
+   these handlers are harmless there. */
+function toggleSheet(open){
+  var sb=document.getElementById('sidebar'),sc=document.getElementById('sheet-scrim');
+  if(!sb)return;
+  if(open===undefined)open=!sb.classList.contains('open');
+  sb.classList.toggle('open',open);
+  if(sc)sc.classList.toggle('show',open);
+  if(!open&&_map)setTimeout(function(){_map.invalidateSize();},220);
+}
+function updateSheetCount(){
+  var el=document.getElementById('sheet-count');
+  if(!el)return;
+  el.textContent=document.querySelectorAll('.map-layer-toggle input:checked').length;
+}
+document.addEventListener('DOMContentLoaded',function(){
+  initMap();
+  updateSheetCount();
+  document.addEventListener('change',function(e){
+    if(e.target&&e.target.matches&&e.target.matches('.map-layer-toggle input'))
+      updateSheetCount();
+  });
+  /* The bulk buttons set checkboxes directly and fire no change event. */
+  ['setGroupLayers','setAllMapLayers','resetMapLayers'].forEach(function(fn){
+    var orig=window[fn];
+    if(typeof orig!=='function')return;
+    window[fn]=function(){var r=orig.apply(this,arguments);updateSheetCount();return r;};
+  });
+});
 </script>
 </body>
 </html>
@@ -3991,7 +4160,9 @@ def build_standalone(layers: dict, bbox: tuple, center: tuple, *,
                      tile_manifest: dict | None = None,
                      vendored: bool = False,
                      page_links: list | None = None,
-                     skip: set | None = None) -> str:
+                     skip: set | None = None,
+                     defer_bytes: int = 0,
+                     data_dir: Path | None = None) -> str:
     s, w, n, e = bbox
     subtitle = (
         f"Search area {s:.2f},{w:.2f} to {n:.2f},{e:.2f} &middot; "
@@ -4012,6 +4183,8 @@ def build_standalone(layers: dict, bbox: tuple, center: tuple, *,
             for href, label in page_links)
         links_html = f'      <div class="page-links">{items}</div>'
 
+    data_script, deferred = build_data_script(
+        layers, defer_bytes=defer_bytes, data_dir=data_dir)
     csp, fonts, libs = local_head() if vendored else (CSP, FONT_LINK, LEAFLET_CDN)
     return (
         STANDALONE_TEMPLATE
@@ -4021,9 +4194,10 @@ def build_standalone(layers: dict, bbox: tuple, center: tuple, *,
         .replace("__CSS__", MAP_CSS)
         .replace("__NAV__", build_nav(layers, skip))
         .replace("__CREDITS__", CREDITS)
-        .replace("__DATA__", build_data_script(layers))
+        .replace("__DATA__", data_script)
         .replace("__INIT__", build_init_js(bbox, center, base_label, zoom,
-                                           default_basemap, tile_manifest))
+                                           default_basemap, tile_manifest,
+                                           deferred=deferred))
         .replace("__PAGELINKS__", links_html)
         .replace("__SUBTITLE__", subtitle)
         .replace("__TITLE__", title)
@@ -4092,13 +4266,13 @@ def inject_map_tab(target: Path, layers: dict, bbox: tuple, center: tuple, *,
     if idx < 0:
         log.warning("No DOMContentLoaded hook found in %s — appending map "
                     "script before </body> instead", target.name)
-        block = ("<script>\n" + build_data_script(layers) + "\n"
+        block = ("<script>\n" + build_data_script(layers)[0] + "\n"
                  + build_init_js(bbox, center, base_label, zoom,
                                  default_basemap, tile_manifest)
                  + boot_js + "</" + "script>\n")
         html = html.replace("</body>", block + "</body>", 1)
     else:
-        block = (build_data_script(layers) + "\n"
+        block = (build_data_script(layers)[0] + "\n"
                  + build_init_js(bbox, center, base_label, zoom,
                                  default_basemap, tile_manifest)
                  + boot_js)
@@ -4247,6 +4421,12 @@ def main():
     parser.add_argument("--only", default=None,
                         help="Comma-separated layer keys to fetch; everything "
                              "else comes from cache")
+    parser.add_argument("--defer-large", type=int, default=0, metavar="KB",
+                        help="Write layers that are off by default and larger "
+                             "than this to data/<key>.json, loaded when first "
+                             "switched on. Cuts the page weight substantially "
+                             "for phones. Requires serving over http, not "
+                             "file://. 0 disables (default)")
     parser.add_argument("--skip", default=None,
                         help="Comma-separated layer keys to leave out entirely. "
                              "Useful for layers whose service is too slow or "
@@ -4500,7 +4680,9 @@ def main():
                                 default_basemap=basemap,
                                 tile_manifest=tile_manifest,
                                 vendored=vendored, page_links=page_links,
-                                skip=skip)
+                                skip=skip,
+                                defer_bytes=args.defer_large * 1024,
+                                data_dir=out_path.parent / "data")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(html, encoding="utf-8")
         final = out_path.resolve()
