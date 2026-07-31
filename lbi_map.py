@@ -272,7 +272,7 @@ LAYER_DEFS = {
 
     # ── Significant Habitat ──
     "sig_habitat": {"group": "habitat", "label": "Significant Habitat",
-                    "color": "#7D3C98", "on": True},
+                    "color": "#7D3C98", "on": False},
     "vernal_pools": {"group": "habitat", "label": "Vernal Pools & Habitat",
                      "color": "#2980B9", "on": False},
     "stream_habitat": {"group": "habitat", "label": "Stream Habitat",
@@ -3403,7 +3403,7 @@ function initMap(){
   _mapLayers.sig_habitat=gj('sig_habitat',{
     style:function(f){
       var c=RANK_TONE[f.properties.rank]||_colors.sig_habitat;
-      return{color:c,weight:1.2,opacity:.85,fillColor:c,fillOpacity:.3,pane:'vectors'};
+      return{color:c,weight:.8,opacity:.6,fillColor:c,fillOpacity:.18,pane:'vectors'};
     }});
   bp(_mapLayers.sig_habitat,function(p){
     var s=kicker('Significant habitat \u2014 NJDEP Landscape Project v'+(p.version||'3.4'))+
