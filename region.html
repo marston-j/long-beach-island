@@ -17,7 +17,12 @@
 *{box-sizing:border-box}
 body{margin:0;font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   color:#1a1a1a;background:#f7f6f3;--accent:#1A6B9A;--muted:#707070}
-.shell{display:flex;height:100vh;overflow:hidden}
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+/* --app-vh is set from window.innerHeight, which is the only figure that
+   tracks iOS Safari's collapsing toolbar. dvh covers browsers where the
+   script has not run yet; plain vh is the last resort. */
+.shell{display:flex;overflow:hidden;
+  height:100vh;height:100dvh;height:calc(var(--app-vh,1dvh)*100)}
 .sidebar{width:290px;flex:0 0 290px;background:#fff;border-right:1px solid #e2ded6;
   display:flex;flex-direction:column;overflow:hidden}
 .sidebar header{padding:14px 16px 10px;border-bottom:1px solid #eee9e0}
@@ -94,7 +99,9 @@ body{margin:0;font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Sego
   .shell{flex-direction:column;position:relative}
   .map-wrap{position:absolute;inset:0}
   .sidebar{position:absolute;left:0;right:0;bottom:0;z-index:1200;width:auto;
-    max-height:86vh;height:86vh;border-right:none;border-top:1px solid #d9d3c9;
+    max-height:86vh;height:86vh;
+    max-height:calc(var(--app-vh,1dvh)*86);height:calc(var(--app-vh,1dvh)*86);
+    border-right:none;border-top:1px solid #d9d3c9;
     border-radius:14px 14px 0 0;box-shadow:0 -4px 24px rgba(0,0,0,.22);
     transform:translateY(100%);transition:transform .22s ease-out;
     padding-bottom:env(safe-area-inset-bottom)}
@@ -1509,9 +1516,23 @@ function updateSheetCount(){
   if(!el)return;
   el.textContent=document.querySelectorAll('.map-layer-toggle input:checked').length;
 }
+/* Track the genuinely visible height. iOS Safari grows and shrinks its
+   toolbar as you scroll and on rotation, and vh does not follow it. */
+function setAppVH(){
+  var h=(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
+  document.documentElement.style.setProperty('--app-vh',(h*0.01)+'px');
+  if(typeof _map!=='undefined'&&_map)_map.invalidateSize();
+}
+
 document.addEventListener('DOMContentLoaded',function(){
+  setAppVH();
   initMap();
   updateSheetCount();
+  window.addEventListener('resize',setAppVH);
+  window.addEventListener('orientationchange',function(){setTimeout(setAppVH,250);});
+  if(window.visualViewport)window.visualViewport.addEventListener('resize',setAppVH);
+  /* Safari reports a stale height while the toolbar animates. */
+  setTimeout(setAppVH,400);
   document.addEventListener('change',function(e){
     if(e.target&&e.target.matches&&e.target.matches('.map-layer-toggle input'))
       updateSheetCount();
