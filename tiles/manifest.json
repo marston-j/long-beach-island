@@ -1,0 +1,34 @@
+{
+ "noaa_chart": {
+  "minZoom": 9,
+  "maxZoom": 13
+ },
+ "esri_imagery": {
+  "minZoom": 9,
+  "maxZoom": 13
+ },
+ "bathymetry": {
+  "minZoom": 9,
+  "maxZoom": 13
+ },
+ "nwi": {
+  "minZoom": 9,
+  "maxZoom": 13
+ },
+ "njdep_wetlands": {
+  "minZoom": 13,
+  "maxZoom": 13
+ },
+ "flood": {
+  "minZoom": 14,
+  "maxZoom": 14
+ },
+ "open_space_all": {
+  "minZoom": 12,
+  "maxZoom": 13
+ },
+ "chanj": {
+  "minZoom": 11,
+  "maxZoom": 13
+ }
+}
