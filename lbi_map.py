@@ -2765,11 +2765,18 @@ var CachedTile=L.TileLayer.extend({
    per bounding box — a page built for one extent can believe a local tile
    exists just outside it. Rather than leave a hole, fall back to the live
    service for any local tile that fails. */
+var _localTilePrefix=null;
 function _tileFallback(layer){
   layer.on('tileerror',function(e){
     var t=e.tile;
     if(!t||t.__lbiRetried||typeof layer.remoteUrl!=='function')return;
-    if(t.src.indexOf(_tileRoot)!==0)return;      // already a remote URL
+    /* t.src is resolved to an absolute URL, so compare against the resolved
+       cache root rather than the relative path it was set from. */
+    if(_localTilePrefix===null){
+      try{_localTilePrefix=new URL(_tileRoot,location.href).href;}
+      catch(err){_localTilePrefix='';}
+    }
+    if(!_localTilePrefix||t.src.indexOf(_localTilePrefix)!==0)return;
     t.__lbiRetried=true;
     t.src=layer.remoteUrl(e.coords);
   });
