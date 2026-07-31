@@ -2902,11 +2902,14 @@ function initMap(){
     icon:L.divIcon({className:'',iconSize:[size||22,size||22],iconAnchor:[(size||22)/2,(size||22)/2],
       html:'<svg width="'+(size||22)+'" height="'+(size||22)+'" viewBox="0 0 24 24">'+
         '<circle cx="12" cy="12" r="11" fill="'+c+'" stroke="#fff" stroke-width="1.6"/>'+svg+'</svg>'})});};}
-  function bp(ly,fn){ly.eachLayer(function(l){
-    var p=l.feature&&l.feature.properties;if(p)l.bindPopup(fn(p),{maxWidth:330});});}
+  /* Remember the popup builder on the layer. Deferred layers are empty at this
+     point, so their features have to be bound once the data arrives. */
+  function bp(ly,fn){ly._lbiPopupFn=fn;_rebindPopups(ly);}
   function nm(p){return '<b>'+(p.name||'Unnamed')+'</b>';}
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-  function kicker(t){return '<span class="popup-kicker">'+t+'</span>';}
+  /* Escapes its argument: several call sites pass OSM tag values, which are
+     editable by anyone. */
+  function kicker(t){return '<span class="popup-kicker">'+esc(t)+'</span>';}
   function row(label,val){return val?'<div class="popup-row">'+label+': '+esc(val)+'</div>':'';}
   function link(url,label){
     if(!url)return '';
@@ -3267,7 +3270,7 @@ function initMap(){
   _mapLayers.old_rail=gj('old_rail',{style:ls(_colors.old_rail,3,'10 4 2 4')});
   bp(_mapLayers.old_rail,function(p){
     var state=p.railway||p['abandoned:railway']||p['was:railway']||'abandoned';
-    var s=kicker('Rail grade — '+esc(state))+
+    var s=kicker('Rail grade — '+state)+
       '<b>'+esc(p.name||p.old_name||'Former railway')+'</b>';
     s+=row('Operator',p.operator);
     s+=row('Opened',p.start_date);
@@ -3379,7 +3382,7 @@ function initMap(){
 
   _mapLayers.focal_areas=gj('focal_areas',{style:ps(_colors.focal_areas,'6 4',.14)});
   bp(_mapLayers.focal_areas,function(p){
-    var s=kicker('Conservation Focal Area — '+esc(p.region||''))+
+    var s=kicker('Conservation Focal Area — '+(p.region||''))+
       '<b>'+esc(p.name||'Focal area')+'</b>';
     if(p.acres)s+=row('Area',Math.round(p.acres).toLocaleString()+' acres');
     if(p.description)s+='<div class="popup-row">'+esc(p.description)+'</div>';
@@ -3644,7 +3647,7 @@ function initMap(){
       fillColor:_colors.hotspots,color:'#fff',weight:2,fillOpacity:.9,pane:'vectors'});}});
   bp(_mapLayers.hotspots,function(p){
     var s=kicker('eBird hotspot')+'<b>'+esc(p.name||'Hotspot')+'</b>';
-    s+='<div class="popup-meta">'+p.numSpecies+' species all-time'+
+    s+='<div class="popup-meta">'+(Number(p.numSpecies)||0)+' species all-time'+
        (p.latestObs?'<br>Latest: '+esc(p.latestObs):'')+'</div>';
     if(p.locId)s+=links(link('https://ebird.org/hotspot/'+encodeURIComponent(p.locId),'View on eBird'));
     return s;
@@ -3824,6 +3827,19 @@ function _restack(){
   }
 }
 
+/* Bind popups for any feature that does not have one yet, using the builder
+   stashed by bp(). Safe to call repeatedly. */
+function _rebindPopups(ly){
+  if(!ly||!ly._lbiPopupFn||!ly.eachLayer)return;
+  var fn=ly._lbiPopupFn;
+  ly.eachLayer(function(l){
+    var p=l.feature&&l.feature.properties;
+    if(!p||!l.bindPopup)return;
+    if(l.getPopup&&l.getPopup())return;
+    l.bindPopup(fn(p),{maxWidth:330});
+  });
+}
+
 /* Layers held back from the page load are fetched the first time they are
    switched on. The layer object already exists with its styling and popups
    wired, so the data is simply poured into it. */
@@ -3840,6 +3856,7 @@ function _loadDeferred(key,cb){
       var ly=_mapLayers[key];
       if(typeof ly._lbiFill==='function')ly._lbiFill(gjson);
       else ly.addData(gjson);
+      _rebindPopups(ly);
       _deferredState[key]='ready';
       if(_map&&_map.hasLayer(ly))_restack();
       if(cnt)cnt.textContent=cnt.dataset.n||cnt.textContent;
