@@ -2692,14 +2692,32 @@ var CachedTile=L.TileLayer.extend({
     this._cacheKey=(options||{}).cacheKey;
     L.TileLayer.prototype.initialize.call(this,url,options);
   },
+  remoteUrl:function(coords){
+    return L.TileLayer.prototype.getTileUrl.call(this,coords);
+  },
   getTileUrl:function(coords){
-    return _cachedTile(this._cacheKey,coords)
-        || L.TileLayer.prototype.getTileUrl.call(this,coords);
+    return _cachedTile(this._cacheKey,coords)||this.remoteUrl(coords);
   }
 });
+
+/* The manifest records which sources and zooms were cached, but coverage is
+   per bounding box — a page built for one extent can believe a local tile
+   exists just outside it. Rather than leave a hole, fall back to the live
+   service for any local tile that fails. */
+function _tileFallback(layer){
+  layer.on('tileerror',function(e){
+    var t=e.tile;
+    if(!t||t.__lbiRetried||typeof layer.remoteUrl!=='function')return;
+    if(t.src.indexOf(_tileRoot)!==0)return;      // already a remote URL
+    t.__lbiRetried=true;
+    t.src=layer.remoteUrl(e.coords);
+  });
+  return layer;
+}
+
 function xyz(cacheKey,url,opts){
   opts=opts||{}; opts.cacheKey=cacheKey;
-  return new CachedTile(url,opts);
+  return _tileFallback(new CachedTile(url,opts));
 }
 
 /* Esri MapServer /export and ImageServer /exportImage rendered as a tile grid.
@@ -2710,9 +2728,7 @@ var EsriDynamic=L.TileLayer.extend({
     this._exportUrl=url;
     L.TileLayer.prototype.initialize.call(this,'',options);
   },
-  getTileUrl:function(coords){
-    var hit=_cachedTile(this.options.cacheKey,coords);
-    if(hit)return hit;
+  remoteUrl:function(coords){
     var R=20037508.342789244,span=2*R/Math.pow(2,coords.z);
     var xmin=-R+coords.x*span,ymax=R-coords.y*span;
     var q=['bbox='+[xmin,ymax-span,xmin+span,ymax].join('%2C'),
@@ -2721,6 +2737,9 @@ var EsriDynamic=L.TileLayer.extend({
     var extra=this.options.exportParams||{};
     for(var k in extra)q.push(encodeURIComponent(k)+'='+encodeURIComponent(extra[k]));
     return this._exportUrl+'?'+q.join('&');
+  },
+  getTileUrl:function(coords){
+    return _cachedTile(this.options.cacheKey,coords)||this.remoteUrl(coords);
   }
 });
 
@@ -2731,11 +2750,12 @@ var NoaaChart=L.TileLayer.extend({
     this._base=url;
     L.TileLayer.prototype.initialize.call(this,'',options);
   },
+  remoteUrl:function(coords){
+    return this._base+'/'+Math.max(0,coords.z-2)+'/'+coords.y+'/'+coords.x+'.png';
+  },
   getTileUrl:function(coords){
-    var hit=_cachedTile(this.options.cacheKey||'noaa_chart',coords);
-    if(hit)return hit;
-    var tm=Math.max(0,coords.z-2);
-    return this._base+'/'+tm+'/'+coords.y+'/'+coords.x+'.png';
+    return _cachedTile(this.options.cacheKey||'noaa_chart',coords)
+        || this.remoteUrl(coords);
   }
 });
 
@@ -2772,18 +2792,18 @@ function initMap(){
   var chartUrl='https://gis.charttools.noaa.gov/arcgis/rest/services/MarineChart_Services/NOAACharts/MapServer/WMTS/tile/1.0.0/MarineChart_Services_NOAACharts/default/GoogleMapsCompatible';
   var chartOpts={attribution:'NOAA Office of Coast Survey — ENC',cacheKey:'noaa_chart',
                  maxNativeZoom:14,maxZoom:19};
-  var noaaChartBase=new NoaaChart(chartUrl,chartOpts);
+  var noaaChartBase=_tileFallback(new NoaaChart(chartUrl,chartOpts));
   var noaaChartHybrid=L.layerGroup([
     xyz('esri_imagery','https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       {attribution:'Esri World Imagery',maxZoom:19}),
-    new NoaaChart(chartUrl,{attribution:'NOAA ENC',cacheKey:'noaa_chart',
-      maxNativeZoom:14,maxZoom:19,opacity:0.72})
+    _tileFallback(new NoaaChart(chartUrl,{attribution:'NOAA ENC',cacheKey:'noaa_chart',
+      maxNativeZoom:14,maxZoom:19,opacity:0.72}))
   ]);
   var noaaChartLight=L.layerGroup([
     xyz('carto_light','https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
       {attribution:'CARTO',maxZoom:19,subdomains:'abcd'}),
-    new NoaaChart(chartUrl,{attribution:'NOAA ENC',cacheKey:'noaa_chart',
-      maxNativeZoom:14,maxZoom:19,opacity:0.85})
+    _tileFallback(new NoaaChart(chartUrl,{attribution:'NOAA ENC',cacheKey:'noaa_chart',
+      maxNativeZoom:14,maxZoom:19,opacity:0.85}))
   ]);
 
   var basemaps={
@@ -3648,10 +3668,10 @@ function initMap(){
     if(d.minNativeZoom!=null)opts.minNativeZoom=d.minNativeZoom;
     if(d.maxNativeZoom!=null)opts.maxNativeZoom=d.maxNativeZoom;
     if(d.service==='noaa_wmts'){
-      _mapLayers[rk]=new NoaaChart(d.url,opts);
+      _mapLayers[rk]=_tileFallback(new NoaaChart(d.url,opts));
     } else {
       opts.exportParams=d.params||{};
-      _mapLayers[rk]=new EsriDynamic(d.url,opts);
+      _mapLayers[rk]=_tileFallback(new EsriDynamic(d.url,opts));
     }
   }
 
