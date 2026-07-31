@@ -2649,8 +2649,10 @@ body{margin:0;font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Sego
   /* The source list is long; keep it out of the way until asked for. */
   .credits{max-height:2.9em;overflow:hidden;position:relative;cursor:pointer}
   .credits.expanded{max-height:none}
-  .credits::after{content:'sources \25BE';position:absolute;right:0;bottom:0;
-    padding:0 10px 0 34px;color:var(--accent);font-weight:600;
+  /* Absolute offsets resolve against the padding box, so the label must be
+     pulled out by the container's own padding to reach the true edge. */
+  .credits::after{content:'sources \25BE';position:absolute;right:-16px;bottom:0;
+    padding:0 16px 0 34px;color:var(--accent);font-weight:600;
     background:linear-gradient(90deg,rgba(255,255,255,0),#fff 30px)}
   .credits.expanded::after{content:''}
 
